@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+import re
+
+from collections import Counter
+
+
+COMBINED_LOG = re.compile(
+    r'^(?P<ip>\S+)'
+    r'\s+\S+'
+    r'\s+\S+'
+    r'\s+\[[^\]]+\]'
+    r'\s+"(?P<request>[^"]*)"'
+    r'\s+(?P<status>\d{3})'
+    r'\s+(?P<size>\S+)'
+    r'\s+"(?P<referrer>[^"]*)"'
+    r'\s+"(?P<ua>[^"]*)"'
+)
+
+
+BOT_KEYWORDS = (
+    "bot",
+    "crawler",
+    "spider",
+    "scanner",
+    "curl",
+    "python-requests",
+    "wget"
+)
+
+
+def parse_line(line):
+
+    match = COMBINED_LOG.match(line)
+
+    if match:
+
+        return match.groupdict()
+
+    parts = line.split()
+
+    return {
+
+        "ip":
+            parts[0] if parts else "unknown",
+
+        "request": "",
+
+        "status": "",
+
+        "size": "",
+
+        "referrer": "",
+
+        "ua": ""
+    }
+
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        description="GxBotDetect - análisis heurístico de bots"
+    )
+
+    parser.add_argument(
+        "file",
+        help="Archivo access.log"
+    )
+
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="reports/botdetect.json"
+    )
+
+    args = parser.parse_args()
+
+    if not os.path.isfile(args.file):
+
+        print("[!] Archivo no encontrado.")
+        return
+
+    ips = Counter()
+    user_agents = Counter()
+
+    suspicious = []
+
+    with open(
+        args.file,
+        "r",
+        encoding="utf-8",
+        errors="replace"
+    ) as file:
+
+        for line in file:
+
+            data = parse_line(line)
+
+            ip = data["ip"]
+
+            ua = data.get(
+                "ua",
+                ""
+            )
+
+            ips[ip] += 1
+
+            if ua:
+
+                user_agents[ua] += 1
+
+                lower_ua = ua.lower()
+
+                if any(
+                    keyword in lower_ua
+                    for keyword in BOT_KEYWORDS
+                ):
+
+                    suspicious.append({
+
+                        "ip": ip,
+
+                        "user_agent": ua,
+
+                        "request":
+                            data["request"]
+                    })
+
+    report = {
+
+        "tool": "GxBotDetect",
+
+        "version": "1.1.0",
+
+        "top_ips":
+            ips.most_common(20),
+
+        "top_user_agents":
+            user_agents.most_common(20),
+
+        "suspicious_user_agents":
+            suspicious[:100],
+
+        "note":
+            "La detección es heurística; una coincidencia no demuestra actividad maliciosa."
+    }
+
+    os.makedirs(
+        os.path.dirname(args.output) or ".",
+        exist_ok=True
+    )
+
+    with open(
+        args.output,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            report,
+            file,
+            indent=2,
+            ensure_ascii=False
+        )
+
+    print("\n[+] GxBotDetect")
+
+    print(
+        f"[+] IPs: {len(ips)}"
+    )
+
+    print(
+        f"[+] User-Agents: {len(user_agents)}"
+    )
+
+    print(
+        f"[+] Coincidencias: {len(suspicious)}"
+    )
+
+    print(
+        f"[+] Reporte: {args.output}"
+    )
+
+
+if name == "main":
+    main()
